@@ -1,0 +1,145 @@
+#define BLYNK_TEMPLATE_ID   "TMPLxxxxxx"       // Vul jouw Template ID in
+#define BLYNK_TEMPLATE_NAME "RFID Dashboard"   // Naam van je template
+#define BLYNK_AUTH_TOKEN    "jouw_auth_token"  // Vul jouw Auth Token in
+
+#include <WiFi.h>
+#include <BlynkSimpleEsp32.h>
+#include <SPI.h>
+#include <MFRC522.h>
+#include <DHT.h>
+
+#define SS_PIN   10
+#define RST_PIN   5
+#define LED_1     2
+#define LED_2     3
+#define LED_3    11
+#define LED_TEMP 18
+#define DHT_PIN  23
+#define DHT_TYPE DHT11
+
+// WiFi instellingen
+char ssid[] = "jouw_wifi_naam";
+char pass[] = "jouw_wifi_wachtwoord";
+
+MFRC522 rfid(SS_PIN, RST_PIN);
+DHT dht(DHT_PIN, DHT_TYPE);
+
+bool led1Aan = false;
+bool led2Aan = false;
+bool led3Aan = false;
+bool teWarm  = false;
+
+unsigned long vorigeTijd  = 0;
+unsigned long knipperTijd = 0;
+bool knipperStatus        = false;
+
+// Blynk: LED aan/uit sturen vanuit de app (optioneel)
+BLYNK_WRITE(V0) {
+  led1Aan = param.asInt();
+  digitalWrite(LED_1, led1Aan ? HIGH : LOW);
+}
+BLYNK_WRITE(V1) {
+  led2Aan = param.asInt();
+  digitalWrite(LED_2, led2Aan ? HIGH : LOW);
+}
+BLYNK_WRITE(V2) {
+  led3Aan = param.asInt();
+  digitalWrite(LED_3, led3Aan ? HIGH : LOW);
+}
+
+void setup() {
+  Serial0.begin(115200);
+  delay(3000);
+
+  pinMode(LED_1,    OUTPUT);
+  pinMode(LED_2,    OUTPUT);
+  pinMode(LED_3,    OUTPUT);
+  pinMode(LED_TEMP, OUTPUT);
+  digitalWrite(LED_1,    LOW);
+  digitalWrite(LED_2,    LOW);
+  digitalWrite(LED_3,    LOW);
+  digitalWrite(LED_TEMP, LOW);
+
+  SPI.begin(4, 6, 7, 10);
+  rfid.PCD_Init();
+  dht.begin();
+
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+  Serial0.println("Klaar!");
+}
+
+void loop() {
+  Blynk.run(); // Blynk verbinding onderhouden
+
+  unsigned long nu = millis();
+
+  // Temperatuur elke 5 seconden controleren
+  if (nu - vorigeTijd >= 5000) {
+    vorigeTijd = nu;
+    float temp = dht.readTemperature();
+    if (isnan(temp)) {
+      Serial0.println("DHT11: leesfout!");
+    } else {
+      Serial0.print("Temperatuur: ");
+      Serial0.print(temp);
+      Serial0.println(" C");
+
+      Blynk.virtualWrite(V3, temp); // Temperatuur naar Blynk sturen
+
+      if (temp > 25.0) {
+        teWarm = true;
+        Serial0.println("Te warm!");
+        Blynk.logEvent("te_warm", "Temperatuur is te hoog!"); // Optionele melding
+      } else {
+        teWarm = false;
+        digitalWrite(LED_TEMP, LOW);
+      }
+    }
+  }
+
+  // Temperatuur LED knipperen zolang het te warm is
+  if (teWarm && nu - knipperTijd >= 300) {
+    knipperTijd   = nu;
+    knipperStatus = !knipperStatus;
+    digitalWrite(LED_TEMP, knipperStatus ? HIGH : LOW);
+  }
+
+  // RFID
+  if (!rfid.PICC_IsNewCardPresent()) return;
+  if (!rfid.PICC_ReadCardSerial())   return;
+
+  String uid = "";
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    if (rfid.uid.uidByte[i] < 0x10) uid += "0";
+    uid += String(rfid.uid.uidByte[i], HEX);
+  }
+  uid.toUpperCase();
+
+  Serial0.print("UID: ");
+  Serial0.println(uid);
+
+  if (uid == "041C96EA9D1B91") {
+    led1Aan = !led1Aan;
+    digitalWrite(LED_1, led1Aan ? HIGH : LOW);
+    Blynk.virtualWrite(V0, led1Aan ? 1 : 0); // Status naar Blynk
+    Serial0.println(led1Aan ? "Kaart 1: AAN" : "Kaart 1: UIT");
+  }
+  else if (uid == "613A2BAA") {
+    led2Aan = !led2Aan;
+    digitalWrite(LED_2, led2Aan ? HIGH : LOW);
+    Blynk.virtualWrite(V1, led2Aan ? 1 : 0);
+    Serial0.println(led2Aan ? "Kaart 2: AAN" : "Kaart 2: UIT");
+  }
+  else if (uid == "E0837A13") {
+    led3Aan = !led3Aan;
+    digitalWrite(LED_3, led3Aan ? HIGH : LOW);
+    Blynk.virtualWrite(V2, led3Aan ? 1 : 0);
+    Serial0.println(led3Aan ? "Kaart 3: AAN" : "Kaart 3: UIT");
+  }
+  else {
+    Serial0.println("Onbekende kaart!");
+  }
+
+  rfid.PICC_HaltA();
+  delay(1000);
+}
