@@ -20,7 +20,7 @@ Dit project is een slim IoT-systeem gebouwd op een **ESP32** microcontroller. Vi
 ---
 
 ##  Demo Video
-
+https://youtube.com/shorts/UFRFydXvMhQ
 
 ---
 
